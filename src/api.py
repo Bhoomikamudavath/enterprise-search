@@ -1,9 +1,18 @@
 from fastapi import FastAPI, Query
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List
 from src.hybrid_retrieval import HybridRetriever
 
 app = FastAPI(title="Enterprise Knowledge Search")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_methods=["GET"],
+    allow_headers=["*"],
+)
+
 retriever = HybridRetriever()
 
 
@@ -13,6 +22,7 @@ class SearchResult(BaseModel):
     snippet: str
     score: int
     url: str
+    tags: List[str]
 
 
 class SearchResponse(BaseModel):
@@ -61,6 +71,7 @@ def search(
             snippet=make_snippet(h, query_terms),
             score=h["score"],
             url=h["url"],
+            tags=h["tags"],
         )
         for h in hits
     ]
