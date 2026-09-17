@@ -2,4 +2,7 @@ venv/
 __pycache__/
 *.pyc
 data/*.xml
+data/*.jsonl
+data/*.pkl
+data/*.bin
 .env
