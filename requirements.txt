@@ -10,3 +10,4 @@ sentence-transformers
 numpy
 pytest
 httpx
+prometheus-client
