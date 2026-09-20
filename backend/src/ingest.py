@@ -32,7 +32,7 @@ def parse_posts(xml_path):
                 "id": post_id,
                 "title": elem.get("Title", ""),
                 "body": clean_html(elem.get("Body", "")),
-                "tags": re.findall(r"<([^>]+)>", elem.get("Tags", "")),
+                "tags": [t for t in elem.get("Tags", "").split("|") if t],
                 "accepted_answer_id": elem.get("AcceptedAnswerId"),
                 "score": int(elem.get("Score", 0)),
             }
