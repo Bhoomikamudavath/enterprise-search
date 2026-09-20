@@ -1,25 +1,24 @@
-import pickle
 import json
-import faiss
-import numpy as np
 from pathlib import Path
+from opensearchpy import OpenSearch
+from qdrant_client import QdrantClient
 from sentence_transformers import SentenceTransformer
-from src.bm25_index import tokenize
 
 DATA_DIR = Path("data")
 MODEL_NAME = "all-MiniLM-L6-v2"
+OPENSEARCH_INDEX = "knowledge-docs"
+QDRANT_COLLECTION = "knowledge-docs"
 RRF_K = 60
 
 
 class HybridRetriever:
     def __init__(self):
-        bm25_data = pickle.load(open(DATA_DIR / "bm25_index.pkl", "rb"))
-        self.bm25 = bm25_data["bm25"]
-        self.bm25_doc_ids = bm25_data["doc_ids"]
-
-        self.faiss_index = faiss.read_index(str(DATA_DIR / "faiss_index.bin"))
-        self.faiss_doc_ids = pickle.load(open(DATA_DIR / "faiss_doc_ids.pkl", "rb"))
-
+        self.opensearch = OpenSearch(
+            hosts=[{"host": "localhost", "port": 9200}],
+            use_ssl=False,
+            verify_certs=False,
+        )
+        self.qdrant = QdrantClient(host="localhost", port=6333)
         self.model = SentenceTransformer(MODEL_NAME)
 
         self.docs_by_id = {}
@@ -29,14 +28,23 @@ class HybridRetriever:
                 self.docs_by_id[d["doc_id"]] = d
 
     def search_bm25(self, query, top_k):
-        scores = self.bm25.get_scores(tokenize(query))
-        ranked = sorted(zip(self.bm25_doc_ids, scores), key=lambda x: -x[1])
-        return [doc_id for doc_id, score in ranked[:top_k]]
+        response = self.opensearch.search(
+            index=OPENSEARCH_INDEX,
+            body={
+                "query": {"match": {"full_text": query}},
+                "size": top_k,
+            },
+        )
+        return [hit["_source"]["doc_id"] for hit in response["hits"]["hits"]]
 
     def search_dense(self, query, top_k):
-        query_vec = self.model.encode([query], normalize_embeddings=True).astype(np.float32)
-        scores, indices = self.faiss_index.search(query_vec, top_k)
-        return [self.faiss_doc_ids[idx] for idx in indices[0]]
+        query_vector = self.model.encode(query, normalize_embeddings=True).tolist()
+        hits = self.qdrant.query_points(
+            collection_name=QDRANT_COLLECTION,
+            query=query_vector,
+            limit=top_k,
+        ).points
+        return [hit.payload["doc_id"] for hit in hits]
 
     def search_hybrid(self, query, top_k, candidate_pool=50):
         bm25_ranked = self.search_bm25(query, candidate_pool)
