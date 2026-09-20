@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+pydantic
+pydantic-settings
+slowapi
+python-dotenv
+opensearch-py
+qdrant-client
+sentence-transformers
+numpy
+pytest
+httpx
