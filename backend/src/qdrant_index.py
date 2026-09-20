@@ -65,7 +65,7 @@ def main():
 
     print(f"Loading model: {MODEL_NAME}")
     model = SentenceTransformer(MODEL_NAME)
-    dim = model.get_sentence_embedding_dimension()
+    dim = model.get_embedding_dimension()
 
     print("Creating Qdrant collection...")
     create_collection(dim)
