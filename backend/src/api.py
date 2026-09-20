@@ -10,7 +10,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
-from src.hybrid_retrieval import HybridRetriever
+from src.hybrid_retrieval import HybridRetriever, RetrieverUnavailable
 from src.config import settings
 
 logging.basicConfig(
@@ -114,7 +114,10 @@ def search(
         raise HTTPException(status_code=503, detail="Search index is not available")
 
     try:
-        hits = retriever.search(q, top_k=top_k * 3 if tag else top_k, mode=mode)
+        hits, actual_mode = retriever.search(q, top_k=top_k * 3 if tag else top_k, mode=mode)
+    except RetrieverUnavailable as e:
+        logger.error(f"Retriever unavailable for query='{q}': {e}")
+        raise HTTPException(status_code=503, detail=f"Search backend unavailable: {e.source}")
     except Exception as e:
         logger.error(f"Search failed for query='{q}': {e}")
         raise HTTPException(status_code=500, detail="Search failed unexpectedly")
@@ -136,7 +139,7 @@ def search(
         for h in hits
     ]
 
-    return SearchResponse(query=q, mode=mode, results=results)
+    return SearchResponse(query=q, mode=actual_mode, results=results)
 
 
 @app.get("/health")
@@ -146,4 +149,9 @@ def health():
             "status": "unhealthy",
             "detail": retriever_load_error or "Retriever not yet loaded",
         }
-    return {"status": "ok"}
+    service_status = retriever.check_health()
+    all_ok = all(v == "ok" for v in service_status.values())
+    return {
+        "status": "ok" if all_ok else "degraded",
+        "services": service_status,
+    }
