@@ -1,4 +1,5 @@
 const API_BASE_URL = "http://127.0.0.1:8000";
+const API_KEY = "my-local-dev-secret-12345";
 
 export type SearchMode = "bm25" | "dense" | "hybrid";
 
@@ -32,9 +33,16 @@ export async function search(
     params.set("tag", tag);
   }
 
-  const response = await fetch(`${API_BASE_URL}/search?${params.toString()}`);
+  const response = await fetch(`${API_BASE_URL}/search?${params.toString()}`, {
+    headers: {
+      "x-api-key": API_KEY,
+    },
+  });
 
   if (!response.ok) {
+    if (response.status === 401) {
+      throw new Error("Unauthorized — check the API key configuration.");
+    }
     throw new Error(`Search failed: ${response.status} ${response.statusText}`);
   }
 

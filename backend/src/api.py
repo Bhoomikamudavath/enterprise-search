@@ -1,19 +1,66 @@
-from fastapi import FastAPI, Query
+import logging
+import time
+import uuid
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, Query, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List
-from src.hybrid_retrieval import HybridRetriever
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
-app = FastAPI(title="Enterprise Knowledge Search")
+from src.hybrid_retrieval import HybridRetriever
+from src.config import settings
+
+logging.basicConfig(
+    level=settings.log_level,
+    format="%(asctime)s | %(levelname)s | %(message)s",
+)
+logger = logging.getLogger("enterprise_search")
+
+limiter = Limiter(key_func=get_remote_address)
+
+retriever: Optional[HybridRetriever] = None
+retriever_load_error: Optional[str] = None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global retriever, retriever_load_error
+    try:
+        logger.info("Loading retrieval indexes...")
+        retriever = HybridRetriever()
+        logger.info("Indexes loaded successfully.")
+    except Exception as e:
+        retriever_load_error = str(e)
+        logger.error(f"Failed to load indexes: {e}")
+    yield
+
+
+app = FastAPI(title="Enterprise Knowledge Search", lifespan=lifespan)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=settings.allowed_origins,
     allow_methods=["GET"],
     allow_headers=["*"],
 )
 
-retriever = HybridRetriever()
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    request_id = str(uuid.uuid4())[:8]
+    start = time.time()
+    response = await call_next(request)
+    duration_ms = round((time.time() - start) * 1000, 1)
+    logger.info(
+        f"[{request_id}] {request.method} {request.url.path} "
+        f"status={response.status_code} duration_ms={duration_ms}"
+    )
+    return response
 
 
 class SearchResult(BaseModel):
@@ -51,13 +98,26 @@ def make_snippet(doc, query_terms, max_len=250):
 
 
 @app.get("/search", response_model=SearchResponse)
+@limiter.limit(settings.rate_limit)
 def search(
-    q: str = Query(..., description="Search query"),
+    request: Request,
+    q: str = Query(..., min_length=1, max_length=300, description="Search query"),
     top_k: int = Query(10, ge=1, le=50),
     mode: str = Query("hybrid", pattern="^(bm25|dense|hybrid)$"),
     tag: Optional[str] = Query(None, description="Filter by tag"),
+    api_key: str = Header(..., alias="x-api-key"),
 ):
-    hits = retriever.search(q, top_k=top_k * 3 if tag else top_k, mode=mode)
+    if api_key != settings.api_key:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
+    if retriever is None:
+        raise HTTPException(status_code=503, detail="Search index is not available")
+
+    try:
+        hits = retriever.search(q, top_k=top_k * 3 if tag else top_k, mode=mode)
+    except Exception as e:
+        logger.error(f"Search failed for query='{q}': {e}")
+        raise HTTPException(status_code=500, detail="Search failed unexpectedly")
 
     if tag:
         hits = [h for h in hits if tag.lower() in [t.lower() for t in h["tags"]]]
@@ -81,4 +141,9 @@ def search(
 
 @app.get("/health")
 def health():
+    if retriever is None:
+        return {
+            "status": "unhealthy",
+            "detail": retriever_load_error or "Retriever not yet loaded",
+        }
     return {"status": "ok"}
