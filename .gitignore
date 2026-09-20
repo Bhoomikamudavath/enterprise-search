@@ -1,8 +1,35 @@
+# Python
 venv/
 __pycache__/
 *.pyc
-data/*.xml
-data/*.jsonl
-data/*.pkl
-data/*.bin
+*.pyo
+.pytest_cache/
+*.egg-info/
+
+# Backend data (generated/large — not committed)
+backend/data/*.xml
+backend/data/*.jsonl
+backend/data/*.pkl
+backend/data/*.bin
+backend/data/eval_results.json
+
+# Environment secrets
+backend/.env
 .env
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Docker
+# (no ignore needed — docker-compose.yml itself is committed)
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs
+*.log
